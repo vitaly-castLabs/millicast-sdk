@@ -1,4 +1,5 @@
 import { View, Director, Logger } from "@millicast/sdk";
+import {rtcDrmGetVersion, rtcDrmConfigure, rtcDrmOnTrack, rtcDrmEnvironments} from './rtc-drm-transform.min.js';
 
 window.Logger = Logger
 
@@ -62,13 +63,14 @@ const newViewer = () => {
   const millicastView = new View(streamName, tokenGenerator, null, autoReconnect)
   millicastView.on("broadcastEvent", (event) => {
     if (!autoReconnect) return;
-  
+
     let layers = event.data["layers"] !== null ? event.data["layers"] : {};
     if (event.name === "layers" && Object.keys(layers).length <= 0) {
     }
   });
   millicastView.on("track", (event) => {
-    addStream(event.streams[0]);
+    rtcDrmOnTrack(event);
+    //addStream(event.streams[0]);
   });
 
   return millicastView
@@ -138,7 +140,7 @@ const addStream = (stream) => {
         } else if (video.paused) {
           try{ tmp.paused(); } catch (e) {}
        }
-       //Replace the video when media has started playing              
+       //Replace the video when media has started playing
        tmp.addEventListener('loadedmetadata', (event) => {
          Logger.log("loadedmetadata tmp",event);
           video.parentNode.replaceChild(tmp, video);
@@ -158,7 +160,7 @@ const addStream = (stream) => {
     } else {
        video.srcObject = stream;
     }
-    
+
     if (audio) audio.parentNode.removeChild(audio);
   }
 };
@@ -179,12 +181,31 @@ const subscribe = async () => {
     return
   }
 
+  const keyId = new Uint8Array([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01]);
+  const iv = new Uint8Array([0xd5, 0xfb, 0xd6, 0xb8, 0x2e, 0xd9, 0x3e, 0x4e, 0xf9, 0x8a, 0xe4, 0x09, 0x31, 0xee, 0x33, 0xb7]);
+  const drmConfig = {
+    merchant: 'six',
+    environment: rtcDrmEnvironments.Staging,
+
+    videoElement: video,
+    audioElement: document.querySelector('audio'),
+
+    video: {codec: 'H264', encryption: 'cbcs', keyId, iv},
+    audio: {codec: 'opus', encryption: 'clear'}
+  };
+  try {
+    rtcDrmConfigure(drmConfig);
+  }
+  catch (err) {
+    alert(`DRM initialization error: ${err.message}`);
+  }
   try {
     isSubscribed = true
     const options = {
       disableVideo: disableVideo,
       disableAudio: disableAudio,
       absCaptureTime: true,
+      peerConfig: {encodedInsertableStreams: true}
     };
     window.millicastView = millicastView = newViewer()
     await millicastView.connect(options);
@@ -237,7 +258,7 @@ window['__onGCastApiAvailable'] = function(isAvailable) {
   if (!isAvailable) {
     return false
   }
-  
+
   const stateChanged = cast.framework.CastContextEventType.CAST_STATE_CHANGED
   const castContext = cast.framework.CastContext.getInstance()
   castContext.setOptions({
