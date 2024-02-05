@@ -2,7 +2,8 @@ import EventEmitter from 'events'
 import TransactionManager from 'transaction-manager'
 import Logger from './Logger'
 import SdpParser from './utils/SdpParser'
-import UserAgent from './utils/UserAgent'
+import { VideoCodec } from './utils/Codecs'
+import PeerConnection from './PeerConnection'
 
 const logger = Logger.get('Signaling')
 
@@ -11,35 +12,6 @@ export const signalingEvents = {
   connectionError: 'wsConnectionError',
   connectionClose: 'wsConnectionClose',
   broadcastEvent: 'broadcastEvent'
-}
-
-/**
- * Enum of Millicast supported Video codecs
- * @readonly
- * @enum {String}
- * @property {String} VP8
- * @property {String} VP9
- * @property {String} H264
- * @property {String} AV1
- * @property {String} H265 - Only available in Safari
- */
-export const VideoCodec = {
-  VP8: 'vp8',
-  VP9: 'vp9',
-  H264: 'h264',
-  AV1: 'av1'
-}
-
-/**
- * Enum of Millicast supported Audio codecs
- * @readonly
- * @enum {String}
- * @property {String} OPUS
- * @property {String} MULTIOPUS
- */
-export const AudioCodec = {
-  OPUS: 'opus',
-  MULTIOPUS: 'multiopus'
 }
 
 /**
@@ -92,10 +64,6 @@ export default class Signaling extends EventEmitter {
     this.transactionManager = null
     this.serverId = null
     this.clusterId = null
-    const browserData = new UserAgent()
-    if (browserData.isSafari()) {
-      VideoCodec.H265 = 'h265'
-    }
   }
 
   /**
@@ -143,7 +111,13 @@ export default class Signaling extends EventEmitter {
            *
            * Inactive - Fires when the stream has stopped broadcasting, but is still available.
            *
-           * Stopped - This event is not currently used, but is reserved for future usage.
+           * Stopped - Fires when the stream has stopped for a given reason.
+           *
+           * Vad - Fires when using multiplexed tracks for audio.
+           *
+           * Layers - Fires when there is an update of the state of the layers in a stream (when broadcasting with simulcast).
+           *
+           * Migrate - Fires when the server is having problems, is shutting down or when viewers need to move for load balancing purposes.
            *
            * Viewercount - Fires when the viewer count changes.
            *
@@ -153,7 +127,7 @@ export default class Signaling extends EventEmitter {
            * @type {Object}
            * @property {String} type - In this case the type of this message is "event".
            * @property {("active" | "inactive" | "stopped" | "vad" | "layers" | "migrate" | "viewercount")} name - Event name.
-           * @property {String|Date|Array|Object} data - Custom event data.
+           * @property {Object} data - Custom event data.
            */
           this.emit(signalingEvents.broadcastEvent, evt)
         })
@@ -206,9 +180,7 @@ export default class Signaling extends EventEmitter {
   /**
    * Establish WebRTC connection with Millicast Server as Subscriber role.
    * @param {String} sdp - The SDP information created by your offer.
-   * @param {SignalingSubscribeOptions | Boolean} options - Signaling Subscribe Options or *Deprecated Enable VAD multiplexing for secondary sources.*
-   * @param {String} pinnedSourceId - *Deprecated, use options parameter instead* Id of the main source that will be received by the default MediaStream.
-   * @param {Array<String>} excludedSourceIds - *Deprecated, use options parameter instead* Do not receive media from the these source ids.
+   * @param {SignalingSubscribeOptions} options - Signaling Subscribe Options.
    * @example const response = await millicastSignaling.subscribe(sdp)
    * @return {Promise<String>} Promise object which represents the SDP command response.
    */
@@ -250,9 +222,7 @@ export default class Signaling extends EventEmitter {
   /**
    * Establish WebRTC connection with Millicast Server as Publisher role.
    * @param {String} sdp - The SDP information created by your offer.
-   * @param {SignalingPublishOptions | VideoCodec} options - Signaling Publish Options or *Deprecated Codec for publish stream (h264 default).*
-   * @param {Boolean} [record] - *Deprecated, use options parameter instead* Enable stream recording. If record is not provided, use default Token configuration. **Only available in Tokens with recording enabled.**
-   * @param {String} [sourceId] - *Deprecated, use options parameter instead* Source unique id. **Only available in Tokens with multisource enabled.***
+   * @param {SignalingPublishOptions} options - Signaling Publish Options.
    * @example const response = await millicastSignaling.publish(sdp, {codec: 'h264'})
    * @return {Promise<String>} Promise object which represents the SDP command response.
    */
@@ -261,11 +231,17 @@ export default class Signaling extends EventEmitter {
 
     logger.info(`Starting publishing to streamName: ${this.streamName}, codec: ${optionsParsed.codec}`)
     logger.debug('Publishing local description: ', sdp)
+    const supportedVideoCodecs = PeerConnection.getCapabilities?.('video')?.codecs?.map(cdc => cdc.codec) ?? []
 
     const videoCodecs = Object.values(VideoCodec)
     if (videoCodecs.indexOf(optionsParsed.codec) === -1) {
-      logger.error('Invalid codec. Possible values are: ', videoCodecs)
-      throw new Error(`Invalid codec. Possible values are: ${videoCodecs}`)
+      logger.error(`Invalid codec ${optionsParsed.codec}. Possible values are: `, videoCodecs)
+      throw new Error(`Invalid codec ${optionsParsed.codec}. Possible values are: ${videoCodecs}`)
+    }
+
+    if (supportedVideoCodecs.length > 0 && supportedVideoCodecs.indexOf(optionsParsed.codec) === -1) {
+      logger.error(`Unsupported codec ${optionsParsed.codec}. Possible values are: `, supportedVideoCodecs)
+      throw new Error(`Unsupported codec ${optionsParsed.codec}. Possible values are: ${supportedVideoCodecs}`)
     }
 
     // Signaling server only recognizes 'AV1' and not 'AV1X'
@@ -278,6 +254,18 @@ export default class Signaling extends EventEmitter {
       sdp,
       codec: optionsParsed.codec,
       sourceId: optionsParsed.sourceId
+    }
+
+    if (optionsParsed.priority) {
+      if (
+        Number.isInteger(optionsParsed.priority) &&
+        optionsParsed.priority >= -2147483648 &&
+        optionsParsed.priority <= 2147483647
+      ) {
+        data.priority = optionsParsed.priority
+      } else {
+        throw new Error('Invalid value for priority option. It should be a decimal integer between the range [-2^31, +2^31 - 1]')
+      }
     }
 
     if (optionsParsed.record !== null) {

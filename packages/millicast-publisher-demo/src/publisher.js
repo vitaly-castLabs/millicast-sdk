@@ -3,6 +3,8 @@ import { Director, Logger } from "@millicast/sdk"
 
 window.Logger = Logger
 
+Logger.setLevel(Logger.DEBUG);
+
 const streamName = process.env.MILLICAST_STREAM_NAME ?? 'demo_' + Math.round(Math.random() * 100) + '_' + new Date().getTime();
 const accountId = process.env.MILLICAST_ACCOUNT_ID
 const publishToken = process.env.MILLICAST_PUBLISH_TOKEN
@@ -137,7 +139,11 @@ document.addEventListener("DOMContentLoaded", async (event) => {
 
   const BroadcastMillicastStream = async () => {
     try{
-      await millicastPublishUserMedia.connect({ bandwidth, events: events })
+      const params = new Proxy(new URLSearchParams(window.location.search), {
+        get: (searchParams, prop) => searchParams.get(prop),
+      });
+      let priority = parseInt(params.priority);
+      await millicastPublishUserMedia.connect({ bandwidth, events: events, priority })
       isBroadcasting = true;
       broadcastHandler();
       setUserCount();
@@ -412,12 +418,9 @@ document.addEventListener("DOMContentLoaded", async (event) => {
     txt.style.position = 'fixed';
     txt.style.left     = '-9999px';
     document.body.appendChild(txt);
-    //console.log('view: ', txt);
 
     let iOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-    //let txt = input;
     if (iOS) {
-      console.log('IS iOS!');
       txt.setAttribute('contenteditable', true);
       txt.setAttribute('readonly', false);
       let range = document.createRange();
@@ -429,7 +432,6 @@ document.addEventListener("DOMContentLoaded", async (event) => {
       txt.setAttribute('contenteditable', false);
       txt.setAttribute('readonly', true);
     } else {
-      //console.log('NOT iOS!');
       txt.select();
     }
     document.execCommand('copy');

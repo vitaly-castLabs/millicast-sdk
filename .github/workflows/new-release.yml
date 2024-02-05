@@ -4,19 +4,22 @@ on:
   release:
     types: [created]
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout 🛎️
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
       
-      - uses: actions/setup-node@v2
+      - uses: actions/setup-node@v3
         with:
           node-version: 14
       
       - name: Restore lerna
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           path: |
             node_modules
@@ -31,9 +34,13 @@ jobs:
       
       - name: Test
         run: npm test
+
+      - name: Install deploy docs deppendencies
+        run: yarn
+        working-directory: ./.github/actions/github-pages-deploy-action-4.1.1
       
       - name: Deploy docs
-        uses: JamesIves/github-pages-deploy-action@4.1.1
+        uses: "./.github/actions/github-pages-deploy-action-4.1.1"
         with:
           branch: docs
           folder: packages/millicast-sdk/docs 
@@ -42,14 +49,14 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/setup-node@v2
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
         with:
           node-version: 14
           registry-url: https://registry.npmjs.org/
 
       - name: Restore lerna
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           path: |
             node_modules

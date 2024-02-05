@@ -211,7 +211,6 @@ const subscribe = async () => {
     await millicastView.connect(options);
   } catch (error) {
     if (!autoReconnect) return;
-    millicastView.reconnect()
   }
 };
 
